@@ -1,0 +1,67 @@
+{
+  "name": "@tflo/browser-events",
+  "version": "0.0.1",
+  "description": "Capture browser events, transform them into typed domain signals with tflo-cep (Rust/WASM), and ship them to GA4 / a first-party collector / any HTTP sink.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./worker": {
+      "import": "./dist/worker.js",
+      "types": "./dist/worker.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "wasm",
+    "README.md",
+    "LICENSE-MIT",
+    "LICENSE-APACHE"
+  ],
+  "scripts": {
+    "build:wasm": "bash scripts/build-wasm.sh",
+    "build:ts": "tsc -p tsconfig.json",
+    "build": "npm run build:wasm && npm run build:ts",
+    "clean": "rm -rf dist wasm",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit -p tsconfig.json"
+  },
+  "keywords": [
+    "analytics",
+    "browser",
+    "cep",
+    "event-pattern-matching",
+    "wasm",
+    "rust",
+    "tflo",
+    "privacy",
+    "first-party"
+  ],
+  "author": "Matt Cochran",
+  "license": "(MIT OR Apache-2.0)",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/matt-cochran/tflo-browser-events"
+  },
+  "bugs": {
+    "url": "https://github.com/matt-cochran/tflo-browser-events/issues"
+  },
+  "homepage": "https://github.com/matt-cochran/tflo-browser-events#readme",
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "typescript": "^5.4.0",
+    "vitest": "^1.4.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

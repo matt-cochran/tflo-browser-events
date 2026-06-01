@@ -1,0 +1,8 @@
+node_modules/
+dist/
+wasm/
+*.log
+.DS_Store
+.env
+.env.local
+coverage/
