@@ -9,85 +9,89 @@
 name: CI
 
 on:
-  push:
-    branches: [main, develop]
-  pull_request:
-    branches: [main]
+    push:
+        branches: [main, develop]
+    pull_request:
+        branches: [main]
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+    group: ${{ github.workflow }}-${{ github.ref }}
+    cancel-in-progress: true
 
 jobs:
-  build-and-test:
-    name: Build & Test (Node ${{ matrix.node }})
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        node: [18, 20, 22]
-      fail-fast: false
+    build-and-test:
+        name: Build & Test (Node ${{ matrix.node }})
+        runs-on: ubuntu-latest
+        strategy:
+            matrix:
+                node: [18, 20, 22]
+            fail-fast: false
 
-    steps:
-      - name: Checkout tflo-browser-events
-        uses: actions/checkout@v4
-        with:
-          path: tflo-browser-events
+        steps:
+            - name: Checkout tflo-browser-events
+              uses: actions/checkout@v4
+              with:
+                  path: tflo-browser-events
 
-      - name: Checkout companion tflo monorepo
-        uses: actions/checkout@v4
-        with:
-          repository: matt-cochran/tflo
-          path: tflo
-          # Shallow clone is fine — we only need the WASM crate
-          fetch-depth: 1
+            - name: Checkout companion tflo monorepo
+              uses: actions/checkout@v4
+              with:
+                  repository: matt-cochran/tflo
+                  path: tflo
+                  # Shallow clone is fine — we only need the WASM crate
+                  fetch-depth: 1
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
+            - name: Install Rust toolchain
+              uses: dtolnay/rust-toolchain@stable
+              with:
+                  targets: wasm32-unknown-unknown
 
-      - name: Install wasm-pack
-        run: |
-          curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+            - name: Install wasm-pack
+              run: |
+                  curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
-      - name: Build WASM (web target) — into src/wasm/
-        working-directory: tflo/tflo-cep-wasm
-        run: |
-          mkdir -p $GITHUB_WORKSPACE/tflo-browser-events/src/wasm
-          wasm-pack build \
-            --target web \
-            --release \
-            --out-dir $GITHUB_WORKSPACE/tflo-browser-events/src/wasm \
-            --out-name tflo_cep_wasm
+            - name: Build WASM (web target) — into src/wasm/
+              working-directory: tflo/tflo-cep-wasm
+              run: |
+                  mkdir -p $GITHUB_WORKSPACE/tflo-browser-events/src/wasm
+                  wasm-pack build \
+                    --target web \
+                    --release \
+                    --out-dir $GITHUB_WORKSPACE/tflo-browser-events/src/wasm \
+                    --out-name tflo_cep_wasm
+              env:
+                  RUSTC_WRAPPER: ""
 
-      - name: Build WASM (nodejs target) — tests depend on this
-        working-directory: tflo/tflo-cep-wasm
-        run: |
-          wasm-pack build \
-            --target nodejs \
-            --release \
-            --out-dir pkg-node \
-            --out-name tflo_cep_wasm
+            - name: Build WASM (nodejs target) — tests depend on this
+              working-directory: tflo/tflo-cep-wasm
+              run: |
+                  wasm-pack build \
+                    --target nodejs \
+                    --release \
+                    --out-dir pkg-node \
+                    --out-name tflo_cep_wasm
+              env:
+                  RUSTC_WRAPPER: ""
 
-      - name: Setup Node.js ${{ matrix.node }}
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ matrix.node }}
-          cache: npm
-          cache-dependency-path: tflo-browser-events/package-lock.json
+            - name: Setup Node.js ${{ matrix.node }}
+              uses: actions/setup-node@v4
+              with:
+                  node-version: ${{ matrix.node }}
+                  cache: npm
+                  cache-dependency-path: tflo-browser-events/package-lock.json
 
-      - name: Install dependencies
-        working-directory: tflo-browser-events
-        run: npm ci
+            - name: Install dependencies
+              working-directory: tflo-browser-events
+              run: npm ci
 
-      - name: Lint (TypeScript type-check)
-        working-directory: tflo-browser-events
-        run: npm run lint
+            - name: Lint (TypeScript type-check)
+              working-directory: tflo-browser-events
+              run: npm run lint
 
-      - name: Run tests
-        working-directory: tflo-browser-events
-        run: npm test
+            - name: Run tests
+              working-directory: tflo-browser-events
+              run: npm test
 
-      - name: Build (TS compilation)
-        working-directory: tflo-browser-events
-        run: npm run build:ts
+            - name: Build (TS compilation)
+              working-directory: tflo-browser-events
+              run: npm run build:ts
