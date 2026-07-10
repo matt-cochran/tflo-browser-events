@@ -8,6 +8,12 @@
 
 export { TFloBrowser, type TFloBrowserOptions } from "./browser.js";
 export {
+    withIdentity,
+    stableSessionId,
+    type Identity,
+    type Signal,
+} from "./identity.js";
+export {
     Pattern,
     CompiledPattern,
     PatternRuntime,

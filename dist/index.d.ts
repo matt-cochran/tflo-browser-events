@@ -6,6 +6,7 @@
  * collector, ClickHouse via relay, console, custom.
  */
 export { TFloBrowser, type TFloBrowserOptions } from "./browser.js";
+export { withIdentity, stableSessionId, type Identity, type Signal, } from "./identity.js";
 export { Pattern, CompiledPattern, PatternRuntime, type Match, type EmitOutput, } from "./pattern.js";
 export { capture, type CaptureOptions, type CaptureHandler, } from "./capture.js";
 export { captureViewport, type CaptureViewportOptions, type ViewportHandler, type ViewportEmitKind, type ObserverFactory, } from "./observers/viewport.js";

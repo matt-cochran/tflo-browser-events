@@ -6,6 +6,7 @@
  * collector, ClickHouse via relay, console, custom.
  */
 export { TFloBrowser } from "./browser.js";
+export { withIdentity, stableSessionId, } from "./identity.js";
 export { Pattern, CompiledPattern, PatternRuntime, } from "./pattern.js";
 // ─── Low-level capture ─────────────────────────────────────────────
 export { capture, } from "./capture.js";

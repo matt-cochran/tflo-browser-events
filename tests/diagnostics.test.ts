@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * Tests for the diagnostics module: diagnosticEvent factory,
  * checkSelectorHealth, checkClickCoverage, and the full diagnostic
