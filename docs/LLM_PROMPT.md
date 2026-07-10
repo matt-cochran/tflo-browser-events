@@ -1,6 +1,6 @@
-# LLM Codegen Prompt — `@tflo/browser-events` Tracking Plan
+# LLM Codegen Prompt — `tflo-browser-events` Tracking Plan
 
-You are generating a `TrackingPlan` for `@tflo/browser-events`, a
+You are generating a `TrackingPlan` for `tflo-browser-events`, a
 declarative browser interaction tracking SDK. The plan is a single
 TypeScript object that auto-wires DOM observers, CEL derivation rules,
 and sink routing.
@@ -10,7 +10,7 @@ and sink routing.
 A single `TrackingPlan` object:
 
 ```ts
-import { type TrackingPlan } from "@tflo/browser-events";
+import { type TrackingPlan } from "tflo-browser-events";
 
 const plan: TrackingPlan = {
   page: { id: "..." },
@@ -196,7 +196,7 @@ After generating the plan, call `validatePlan(plan)` and read the
 report. Fix any errors (missing selectors, bad CEL), then re-validate.
 
 ```ts
-import { validatePlan } from "@tflo/browser-events";
+import { validatePlan } from "tflo-browser-events";
 
 const report = validatePlan(plan);
 if (!report.valid) {

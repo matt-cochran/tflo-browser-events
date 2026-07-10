@@ -1,5 +1,5 @@
 /**
- * @tflo/browser-events
+ * tflo-browser-events
  *
  * Browser SDK for `tflo-cep`: capture events, derive signals from
  * declarative patterns, ship them to any sink — GA4, your own edge
