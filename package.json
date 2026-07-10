@@ -26,7 +26,8 @@
   "scripts": {
     "build:wasm": "bash scripts/build-wasm.sh",
     "build:ts": "tsc -p tsconfig.json",
-    "build": "npm run build:wasm && npm run build:ts",
+    "copy:wasm": "mkdir -p dist/wasm && cp src/wasm/tflo_cep_wasm.js src/wasm/tflo_cep_wasm.d.ts src/wasm/tflo_cep_wasm_bg.wasm src/wasm/tflo_cep_wasm_bg.wasm.d.ts dist/wasm/",
+    "build": "npm run build:wasm && npm run build:ts && npm run copy:wasm",
     "clean": "rm -rf dist wasm",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -58,6 +59,7 @@
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
+    "jsdom": "^24.0.0",
     "typescript": "^5.4.0",
     "vitest": "^1.4.0"
   },
