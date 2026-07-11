@@ -1,3 +1,6 @@
+// @vitest-environment jsdom
+// (uses the global CustomEvent, which is not a Node global before v19 — jsdom
+//  provides it so the suite passes on Node 18, matching the other DOM tests.)
 import { describe, expect, it, vi } from "vitest";
 import { capture, type EventRecord } from "../src/index.js";
 
