@@ -1,4 +1,4 @@
-# @tflo/browser-events
+# tflo-browser-events
 
 Capture browser interactions, derive typed domain signals from declarative
 CEL patterns, and route them to **any** sink — Google Analytics 4, your own
@@ -33,7 +33,7 @@ of WebAssembly.
 ## Quickstart — tracking plan
 
 ```ts
-import { tflo, type TrackingPlan } from "@tflo/browser-events";
+import { tflo, type TrackingPlan } from "tflo-browser-events";
 
 const plan: TrackingPlan = {
   page: {
@@ -282,7 +282,7 @@ writing CEL by hand.
 | `full_engagement` | section_engagement + rage_click heuristic |
 
 ```ts
-import { tflo } from "@tflo/browser-events";
+import { tflo } from "tflo-browser-events";
 
 tflo({
   page: { id: "landing" },
@@ -369,7 +369,7 @@ The underlying `TFloBrowser` class, pattern builder, capture helpers,
 and sink router are still fully available for custom wiring:
 
 ```ts
-import { TFloBrowser, Pattern, ConsoleSink, type EventRecord } from "@tflo/browser-events";
+import { TFloBrowser, Pattern, ConsoleSink, type EventRecord } from "tflo-browser-events";
 
 const tflo = new TFloBrowser({ sinks: [new ConsoleSink()] });
 await tflo.init();
@@ -409,7 +409,7 @@ auto: {
 A codegen prompt can be as simple as:
 
 > "Given this React component tree, generate a `TrackingPlan` for
-> `@tflo/browser-events` that tracks section visibility, CTA clicks,
+> `tflo-browser-events` that tracks section visibility, CTA clicks,
 > JS errors, scroll depth, and lifecycle transitions. Use `data-tflow-id`
 > attributes for buttons and `data-track-section` for sections."
 

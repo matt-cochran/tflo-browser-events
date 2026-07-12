@@ -20,6 +20,7 @@
 
 import { capture as bindCapture, type CaptureOptions, type CaptureHandler } from "./capture.js";
 import init from "./wasm/tflo_cep_wasm.js";
+import { stableSessionId, withIdentity, type Identity } from "./identity.js";
 import {
   captureViewport as bindCaptureViewport,
   type CaptureViewportOptions,
@@ -40,6 +41,26 @@ export interface TFloBrowserOptions {
   wasmUrl?: string | URL;
   /** Error sink — receives delivery errors from individual sinks. */
   onSinkError?: (sinkName: string, err: unknown) => void;
+  /**
+   * Identity stamping — when set, every emitted signal is stamped with
+   * `app_id` / `environment` / `session_id` (and, if supplied,
+   * `user_id_hash` / `tenant_id_hash`) before routing to sinks. Never
+   * stamps raw PII — callers must pre-hash user/tenant identifiers.
+   *
+   * `sessionId` defaults to `stableSessionId()` — a `sessionStorage`-backed
+   * id that stays stable across SPA route changes within the same tab.
+   * Falls back to a fresh per-instance id when `sessionStorage` is
+   * unavailable (SSR, workers, non-DOM tests).
+   */
+  identity?: Omit<Identity, "sessionId"> & { sessionId?: string };
+}
+
+/** Best-effort session id: uses the durable `sessionStorage`-backed id
+ * when available, otherwise mints a one-off id for this instance. */
+function resolveSessionId(explicit?: string): string {
+  if (explicit) return explicit;
+  if (typeof sessionStorage !== "undefined") return stableSessionId();
+  return crypto.randomUUID();
 }
 
 /**
@@ -61,11 +82,16 @@ export class TFloBrowser {
   private readonly unbinders: Array<() => void> = [];
   private readonly consent?: () => boolean;
   private readonly opts: TFloBrowserOptions;
+  private readonly stampIdentity?: (signal: DerivedSignal) => DerivedSignal;
   private initialized: Promise<void> | null = null;
 
   constructor(opts: TFloBrowserOptions = {}) {
     this.opts = opts;
     this.consent = opts.consent;
+    if (opts.identity) {
+      const sessionId = resolveSessionId(opts.identity.sessionId);
+      this.stampIdentity = withIdentity({ ...opts.identity, sessionId });
+    }
     this.router = new SinkRouter({
       sinks: opts.sinks,
       onError: opts.onSinkError,
@@ -182,7 +208,7 @@ export class TFloBrowser {
     if (signals.length === 0) return;
     if (this.consent && !this.consent()) return;
     for (const signal of signals) {
-      void this.router.route(signal);
+      void this.router.route(this.stampIdentity ? this.stampIdentity(signal) : signal);
     }
   }
 }

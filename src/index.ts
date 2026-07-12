@@ -1,5 +1,5 @@
 /**
- * @tflo/browser-events
+ * tflo-browser-events
  *
  * Browser SDK for `tflo-cep`: capture events, derive signals from
  * declarative patterns, ship them to any sink — GA4, your own edge
@@ -7,6 +7,12 @@
  */
 
 export { TFloBrowser, type TFloBrowserOptions } from "./browser.js";
+export {
+    withIdentity,
+    stableSessionId,
+    type Identity,
+    type Signal,
+} from "./identity.js";
 export {
     Pattern,
     CompiledPattern,
