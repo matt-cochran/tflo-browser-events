@@ -12,14 +12,24 @@ All notable changes to this package. The format follows
   titles) to a sink. They now carry only `tflowId` and `tag` (#10).
 - **Migration:** to keep text for a click, set `captureText: true` on that entry in
   `track.clicks`. Only do this where the element's text is never customer content.
+- **`document.title` is no longer sent by default.** `session_started` omits `title` unless
+  `page.captureTitle: true` or you set `page.title` yourself.
+- **URLs read from the page keep origin + path only.** Query strings and fragments are
+  removed from the page URL, the referrer, route-change records (no `hash` field), resource-error
+  URLs, and URLs inside error messages and stacks (stack frames keep `:line:col`).
+- **Migration:** identify pages with `page.id` and `page.attrs`. Set `page.captureTitle: true`
+  or `page.captureFullUrls: true` only where titles and query strings can't hold customer
+  content or tokens. Values you pass as `page.title`, `page.url` or `page.referrer` are sent
+  as given.
 
 ### Added
 - `track.clicks[].captureText` opt-in. Even when it's on, text is never taken from inputs
   (including passwords), textareas, selects, editable regions, or anything inside
   `[data-tflo-mask]` or `[data-jz-mask]`; those parts are skipped and the rest kept.
 - `data-tflo-mask` attribute marking a subtree whose text never leaves the page.
-- `capturableText`, `MASK_SELECTOR` and `MAX_CAPTURED_TEXT` exports for hosts that apply the
-  same rule in their own sinks.
+- `page.captureTitle` and `page.captureFullUrls` opt-ins.
+- `capturableText`, `pathOnlyUrl`, `stripUrlQueries`, `MASK_SELECTOR` and `MAX_CAPTURED_TEXT`
+  exports for hosts that apply the same rules in their own sinks.
 
 ## [0.2.0] — 2026-10-08
 

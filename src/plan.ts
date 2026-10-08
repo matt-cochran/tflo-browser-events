@@ -43,7 +43,7 @@ import { Pattern } from "./pattern.js";
 import { ConsoleSink, EdgeSink, GA4Sink } from "./sinks/index.js";
 import { expandPresets } from "./presets.js";
 import { checkSelectorHealth } from "./diagnostics.js";
-import { capturableText } from "./privacy.js";
+import { capturableText, pathOnlyUrl } from "./privacy.js";
 import type {
     EventRecord,
     TrackingPlan,
@@ -150,6 +150,7 @@ export async function init(plan: TrackingPlan): Promise<TFlowInitResult> {
         unbindFns.push(
             captureErrors({
                 cfg: plan.track.errors,
+                fullUrls: plan.page.captureFullUrls === true,
                 handler: (raw) => tflo.ingest(enrichPage(raw)),
             }),
         );
@@ -180,6 +181,7 @@ export async function init(plan: TrackingPlan): Promise<TFlowInitResult> {
         unbindFns.push(
             captureLifecycle({
                 cfg: plan.track.lifecycle,
+                fullUrls: plan.page.captureFullUrls === true,
                 handler: (raw) => tflo.ingest(enrichPage(raw)),
             }),
         );
@@ -533,9 +535,12 @@ function buildSessionStartEvent(
         page: { id: page.id, attrs: page.attrs },
         fields: {
             sessionId,
-            title: page.title ?? resolveDocumentTitle(),
-            url: page.url ?? resolveUrl(),
-            referrer: page.referrer ?? resolveReferrer(),
+            // Title only when given or opted in; URLs path-only unless opted in (privacy.ts).
+            ...(page.title !== undefined || page.captureTitle === true
+                ? { title: page.title ?? resolveDocumentTitle() }
+                : {}),
+            url: page.url ?? fullOrPath(resolveUrl(), page.captureFullUrls),
+            referrer: page.referrer ?? fullOrPath(resolveReferrer(), page.captureFullUrls),
             locale: page.locale ?? resolveLocale(),
             trafficSource: page.trafficSource ?? null,
             trafficMedium: page.trafficMedium ?? null,
@@ -544,6 +549,10 @@ function buildSessionStartEvent(
         },
         target: { id: page.id, type: "page" },
     };
+}
+
+function fullOrPath(url: string, full: boolean | undefined): string {
+    return full === true ? url : pathOnlyUrl(url);
 }
 
 function resolveDocumentTitle(): string {

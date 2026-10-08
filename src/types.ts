@@ -78,12 +78,24 @@ export interface PageInfo {
     attrs?: Record<string, string>;
 
     // ─── Auto-populated (GA4-inspired) ──────────────────────────
-    /** Page title — defaults to `document.title`. */
+    /** Page title. Sent as given. When omitted, `document.title` is sent
+     * only if `captureTitle` is true. */
     title?: string;
-    /** Full URL — defaults to `location.href`. */
+    /** Page URL. Sent as given. When omitted, `location.href` is sent as
+     * origin + path (no query or fragment) unless `captureFullUrls` is true. */
     url?: string;
-    /** Referring URL — defaults to `document.referrer`. */
+    /** Referring URL. Sent as given. When omitted, `document.referrer` is
+     * sent as origin + path unless `captureFullUrls` is true. */
     referrer?: string;
+    /** Opt in to sending `document.title` on `session_started`. **Off by
+     * default.** Unsafe where titles can hold customer content (names,
+     * ticket titles); prefer `id` and `attrs`. */
+    captureTitle?: boolean;
+    /** Opt in to query strings and fragments in URLs read from the page:
+     * the page URL, the referrer, route-change `hash`, resource-error URLs
+     * and URLs inside error messages and stacks. **Off by default**: they
+     * carry tokens, emails and search terms. */
+    captureFullUrls?: boolean;
     /** Locale — defaults to `navigator.language`. */
     locale?: string;
     /** Traffic source classification. Optional; set by your own

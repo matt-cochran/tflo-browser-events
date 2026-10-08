@@ -114,6 +114,28 @@ the durable click contract:
 
 Sections are matched by CSS selector (stable — use `id` attributes).
 
+### Page context and URLs
+
+At start-up a `session_started` record carries page context. By default it **does not include
+`document.title`**, and every URL read from the page keeps origin + path only: the page URL,
+the referrer, the route-change `hash`, resource-error URLs, and URLs inside error messages and
+stacks (stack frames keep their `:line:col`). Query strings and fragments carry tokens, emails
+and search terms.
+
+Prefer `page.id` and `page.attrs` for identifying pages. Opt in only where it's safe:
+
+```ts
+page: {
+  id: "product-detail",
+  captureTitle: true,    // sends document.title (unsafe if titles hold customer content)
+  captureFullUrls: true, // keeps query strings and fragments in URLs
+}
+```
+
+Values you set explicitly (`page.title`, `page.url`, `page.referrer`) are sent as given.
+
+> **Changed in 0.3.0:** earlier versions sent `document.title` and full URLs by default.
+
 ## Three-layer model
 
 ```text
@@ -520,6 +542,7 @@ tests/sinks.test.ts           7 tests   sink routing, error isolation, GA4
 tests/pattern-runtime.test.ts 6 tests   abandoned_cart, engaged_with_product, flush, builder validation
 tests/viewport.test.ts        6 tests   enter/exit/dwell, threshold-stepping, trailing-flush, multi-section
 tests/capture.test.ts         4 tests   custom fields, throttling, unbind
+tests/page-privacy.test.ts    9 tests   no title by default, path-only URLs (page, referrer, route hash, error URLs, stacks), opt-ins
 tests/click-text.test.ts     11 tests   no element text by default, captureText opt-in, masked/form/editable regions skipped
 src/__tests__/identity.test.ts 2 tests  identity stamping, stable session id
 ```
@@ -549,7 +572,7 @@ cd tflo-browser-events
 npm install
 npm run build:wasm       # invokes wasm-pack against ../tflo/tflo-cep-wasm
 npm run build:ts         # invokes tsc
-npm test                 # 159 tests
+npm test                 # 168 tests
 ```
 
 `TFLO_PATH` overrides the default `../tflo` location.

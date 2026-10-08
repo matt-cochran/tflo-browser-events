@@ -28,6 +28,10 @@ step-by-step guide for generating one: page type, sections, clicks, presets, CEL
   is never customer content. Even then, text from form fields, editable regions and anything
   inside `[data-tflo-mask]` or `[data-jz-mask]` is never taken.
 - Mark customer content with `data-tflo-mask` (or `data-jz-mask` on Journeeze hosts).
+- Page context sends no `document.title` and keeps URLs to origin + path by default (since
+  0.3.0): no query strings or fragments in the page URL, referrer, route changes or error
+  records. Identify pages with `page.id` and `page.attrs`. Use `page.captureTitle` or
+  `page.captureFullUrls` only where they can't hold customer content or tokens.
 - Ship derived signals, not raw events, to third parties. Raw records stay in the page.
 
 ## One runtime per page

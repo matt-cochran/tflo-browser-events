@@ -5,6 +5,10 @@
  * click (`track.clicks[].captureText: true`). Even then, text is never
  * taken from form fields, editable regions or masked subtrees, because
  * those are where customer content and typed values live.
+ *
+ * URLs read from the page keep only origin + path unless the plan opts in
+ * with `page.captureFullUrls: true`: query strings and fragments carry
+ * tokens, emails and search terms.
  */
 
 /** Attributes that mark a subtree whose text must never leave the page. */
@@ -50,4 +54,25 @@ export function capturableText(el: Element): string | null {
 
     const text = parts.join(" ").replace(/\s+/g, " ").trim().slice(0, MAX_CAPTURED_TEXT);
     return text === "" ? null : text;
+}
+
+/**
+ * `url` with its query string and fragment removed (origin + path).
+ * Relative URLs are kept relative. Empty input stays empty.
+ */
+export function pathOnlyUrl(url: string): string {
+    if (url === "") return "";
+    const cut = url.search(/[?#]/);
+    return cut === -1 ? url : url.slice(0, cut);
+}
+
+/**
+ * Every absolute URL inside `text` (messages, stack traces) reduced to
+ * origin + path. A trailing `:line` or `:line:col` (stack frames) is kept.
+ */
+export function stripUrlQueries(text: string): string {
+    return text.replace(
+        /\b([a-z][a-z0-9+.-]*:\/\/[^\s?#()'"<>]*)[?#][^\s()'"<>]*/gi,
+        (match: string, base: string) => base + (/(:\d+){1,2}$/.exec(match)?.[0] ?? ""),
+    );
 }

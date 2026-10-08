@@ -27,10 +27,11 @@ Agents building a host app that uses this package: read
   fallback. No secrets in the repo.
 
 ## Privacy
-Capture never records input values, and never records element text unless a click opts in
-with `captureText`. Even then, `src/privacy.ts` skips form fields, editable regions and
+Capture never records input values, never records element text unless a click opts in with
+`captureText`, never sends `document.title` unless `page.captureTitle`, and keeps URLs read
+from the page to origin + path unless `page.captureFullUrls`. Even then, `src/privacy.ts` skips form fields, editable regions and
 `[data-tflo-mask]` / `[data-jz-mask]` subtrees. Any new capture of page text goes through
-`capturableText` and needs its own opt-in.
+`capturableText` (text) or `pathOnlyUrl` / `stripUrlQueries` (URLs) and needs its own opt-in.
 
 ## EdgeSink is a contract
 `src/sinks/edge.ts` is consumed by Journeeze:
