@@ -5,8 +5,8 @@
 # npm dist-tag: rc tags publish under 'rc', stable tags under 'latest'.
 #
 # Authentication: 'npm publish --provenance' prefers OIDC trusted publishing
-# (id-token: write). NODE_AUTH_TOKEN is only a fallback for the very first publish
-# of the new scoped name, before the npm trusted publisher exists. Leave the
+# (id-token: write). NODE_AUTH_TOKEN is only a fallback until the npm trusted
+# publisher is configured for tflo-browser-events (0.2.0 was published manually). Leave the
 # NPM_TOKEN secret unset afterwards and OIDC is used.
 
 name: Publish
@@ -186,8 +186,8 @@ jobs:
                   "
 
             # (14) Publish under the derived dist-tag.
-            #      NODE_AUTH_TOKEN is used only for the first publish of the new
-            #      scoped name, before the npm trusted publisher exists. Leave the
+            #      NODE_AUTH_TOKEN is used only until the npm trusted publisher
+            #      is configured for tflo-browser-events. Leave the
             #      secret unset afterwards and OIDC is used.
             - name: Publish to npm
               working-directory: tflo-browser-events
