@@ -20,7 +20,9 @@
     "!dist/**/*.test.*",
     "README.md",
     "LICENSE-MIT",
-    "LICENSE-APACHE"
+    "LICENSE-APACHE",
+    "docs/AGENTS-integrating.md",
+    "docs/LLM_PROMPT.md"
   ],
   "scripts": {
     "build:wasm": "bash scripts/build-wasm.sh",
