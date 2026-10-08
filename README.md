@@ -13,6 +13,19 @@ of WebAssembly.
 
 ---
 
+## Install
+
+```bash
+npm install tflo-browser-events
+```
+
+ESM only. The WebAssembly engine ships inside the package (`dist/wasm/`), so
+there is nothing else to build or host. If your site sends a Content Security
+Policy, allow WebAssembly compilation with `script-src 'wasm-unsafe-eval'`.
+
+---
+
+- [Install](#install)
 - [Quickstart — tracking plan](#quickstart--tracking-plan)
 - [Three-layer model](#three-layer-model)
 - [Sections (IntersectionObserver)](#sections-intersectionobserver)
@@ -363,6 +376,66 @@ This auto-creates the underlying sink implementations:
 | `ga4` | `GA4Sink` — forwards via `gtag.js` to Google Analytics 4 |
 | `edge` | `EdgeSink` — POSTs to your own edge collector |
 
+The tracking plan passes only `endpoint`, `batchSize`, `batchIntervalMs` and
+`headers` to `EdgeSink`. For the options below, construct it yourself and pass
+it to `TFloBrowser` (see [Advanced](#advanced-lower-level-tflobrowser-api)).
+
+### `EdgeSink`
+
+```ts
+import { EdgeSink } from "tflo-browser-events";
+
+const edge = new EdgeSink({
+  endpoint: "https://collector.example.com/signals",
+  contentType: "text/plain", // CORS-simple request: no preflight
+  batchSize: 20,
+  onDrop: (reason, count) => console.warn("edge dropped", reason, count),
+});
+
+edge.stats(); // { queued, dropped, sent }
+```
+
+| Option | Default | Meaning |
+|---|---|---|
+| `endpoint` | required | URL that accepts the batch body |
+| `batchSize` | 20 | Events per request, 1–50 |
+| `maxBatchBytes` | 32768 | Encoded body bytes per request |
+| `batchIntervalMs` | 1000 | Wait before sending a partial batch |
+| `contentType` | `"application/json"` | `"text/plain"` sends `text/plain;charset=UTF-8` with no other headers, so the browser makes no CORS preflight. The body is still JSON |
+| `headers` | none | Custom headers. Only with `application/json`; refused with `text/plain`, because they would force a preflight |
+| `maxQueueEvents` / `maxQueueBytes` | 200 / 262144 | In-memory queue bounds, including batches waiting to retry |
+| `onDrop` | none | Called with a reason (`queue_full`, `non_retriable`, `retries_exhausted`, `oversize`, `page_end_overflow`) and a count |
+| `profile` | `"generic"` | `"journeeze"`: `text/plain` only, custom headers refused, 50 events per batch, 5 s cadence, 16 KiB page-end beacon unless `pageEndBudget` is given |
+| `pageEndBudget` | none | `{ available(), commit(bytes) }` shared by every sender on the page, so their page-end beacons stay inside the browser's quota together |
+| `encode` | `{"batch":[...]}` | Builds the request body for a batch; also receives `droppedSinceLastSend` |
+| `transform` | none | Maps a signal to its wire fields, or returns `null` to drop it in the browser |
+| `bindPageLifecycle` | `true` | Listen to `visibilitychange`, `pagehide`, `pageshow` and `online` |
+
+How it sends:
+
+- **Ids.** Each event gets an `event_id` (UUIDv7) and a per-instance `seq` when it
+  is queued. Both stay the same across retries and beacons, so the collector can
+  de-duplicate.
+- **Batching.** A full batch goes at once, a partial one after
+  `batchIntervalMs`. One request is in flight at a time, oldest events first.
+- **Retry.** Network failures and 408, 429, 500, 502, 503 and 504 keep the batch at
+  the head of the queue and retry with exponential backoff (1 s base, 60 s cap,
+  ±50% jitter), waiting at least `Retry-After` (capped at 60 s). At most 5 retries
+  (3 for network failures). Offline pauses retries until `online`. Other statuses
+  drop the batch.
+- **Memory only.** When the queue is full the oldest events are dropped and
+  reported through `onDrop` and `stats()`. Nothing is ever persisted.
+- **Page end** (`visibilitychange` to hidden, `pagehide`, or
+  `flush({ unloading: true })`): one `sendBeacon` of at most one batch. If the
+  beacon is accepted, anything that did not fit is dropped. If it is refused or
+  unavailable, nothing is dropped and no keepalive `fetch` is tried (the two share
+  one quota); the queue is sent when the page is shown again. `unload` and
+  `beforeunload` are never used.
+
+> **Behaviour change in 0.2.0.** A refused page-end beacon no longer falls back to
+> a keepalive `fetch`, and failed sends are retried instead of lost. See
+> [CHANGELOG.md](CHANGELOG.md).
+
 ## Advanced: lower-level `TFloBrowser` API
 
 The underlying `TFloBrowser` class, pattern builder, capture helpers,
@@ -418,30 +491,33 @@ The output is a single JSON object — no imperative wiring code needed.
 ## What's tested
 
 ```
-tests/sinks.test.ts          10 tests   sink routing, error isolation, GA4, EdgeSink batching + sendBeacon
-tests/capture.test.ts         4 tests   custom fields, throttling, unbind
-tests/viewport.test.ts        6 tests   enter/exit/dwell, threshold-stepping, trailing-flush, multi-section
+tests/edge.test.ts           81 tests   EdgeSink: ids, batching, text/plain, retry + Retry-After, offline, bounded queue, page end, journeeze profile, shared budget
+tests/diagnostics.test.ts    14 tests   error, scroll-depth, visibility and lifecycle capture
+tests/validate.test.ts       10 tests   tracking-plan validation
+tests/plan.test.ts            9 tests   CEL evaluator, path resolver, sink factory, rule compiling
+tests/presets.test.ts         9 tests   preset expansion, deduplication, rule structure
+tests/sinks.test.ts           7 tests   sink routing, error isolation, GA4
 tests/pattern-runtime.test.ts 6 tests   abandoned_cart, engaged_with_product, flush, builder validation
-tests/plan.test.ts           10 tests   CEL evaluator, path resolver, sink factory, rule compiling
-tests/presets.test.ts         6 tests   preset expansion, deduplication, rule structure validation
-                              ─────────
-                              42 passed
+tests/viewport.test.ts        6 tests   enter/exit/dwell, threshold-stepping, trailing-flush, multi-section
+tests/capture.test.ts         4 tests   custom fields, throttling, unbind
+src/__tests__/identity.test.ts 2 tests  identity stamping, stable session id
 ```
 
 All pattern-runtime tests drive the real WASM (loaded via the
 `tflo_cep_wasm` nodejs-target build), so the matching engine is
 end-to-end verified through the TypeScript surface.
 
-## Roadmap to v0.2
+## Roadmap
 
 - **WASM CEL parser** — compile from the `tflo-cel-parser` crate for full
   CEL support (string ops, `has()`, `startsWith()`, `in`, arithmetic)
-- **`repeated(n..=m, predicate)`** — quantifier sugar for "N+ clicks within T"
-- **IndexedDB retry queue** — for offline / unstable network
+- **`repeated(n..=m, predicate)`** — quantifier sugar for "N+ clicks within T";
+  the `rage_click` preset needs it to count clicks exactly
+- **Durable retry queue** — IndexedDB, for offline and unstable networks
+  (0.2.0 retries in memory only)
 - **Service-worker replay** — backfill on the next page load
 - **`PerformanceObserver` adapter** — Long Tasks, LCP, INP, navigation timing
 - **Worker mode** — run the matching engine in a dedicated Worker
-- **Derived signals** — hovered_cta, hesitated_on_form, rage_click, dead_click
 
 ## Build from source
 
@@ -452,7 +528,7 @@ cd tflo-browser-events
 npm install
 npm run build:wasm       # invokes wasm-pack against ../tflo/tflo-cep-wasm
 npm run build:ts         # invokes tsc
-npm test                 # 36 tests
+npm test                 # 148 tests
 ```
 
 `TFLO_PATH` overrides the default `../tflo` location.
