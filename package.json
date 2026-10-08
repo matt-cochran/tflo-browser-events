@@ -1,6 +1,6 @@
 {
-  "name": "tflo-browser-events",
-  "version": "0.1.0",
+  "name": "@tflo/browser-events",
+  "version": "0.2.0",
   "description": "Capture browser events, transform them into typed domain signals with tflo-cep (Rust/WASM), and ship them to GA4 / a first-party collector / any HTTP sink.",
   "type": "module",
   "main": "./dist/index.js",
@@ -8,13 +8,16 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
-    }
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./wasm/tflo_cep_wasm_bg.wasm": "./dist/wasm/tflo_cep_wasm_bg.wasm",
+    "./package.json": "./package.json"
   },
   "files": [
     "dist",
-    "wasm",
+    "!dist/__tests__",
+    "!dist/**/*.test.*",
     "README.md",
     "LICENSE-MIT",
     "LICENSE-APACHE"
@@ -23,6 +26,8 @@
     "build:wasm": "bash scripts/build-wasm.sh",
     "build:ts": "tsc -p tsconfig.json",
     "copy:wasm": "mkdir -p dist/wasm && cp src/wasm/tflo_cep_wasm.js src/wasm/tflo_cep_wasm.d.ts src/wasm/tflo_cep_wasm_bg.wasm src/wasm/tflo_cep_wasm_bg.wasm.d.ts dist/wasm/",
+    "verify:pack": "node -e \"const fs=require('fs');for (const f of ['dist/index.js','dist/index.d.ts','dist/wasm/tflo_cep_wasm.js','dist/wasm/tflo_cep_wasm_bg.wasm']) if(!fs.existsSync(f)){console.error('missing '+f);process.exit(1)}\"",
+    "prepublishOnly": "npm run verify:pack",
     "build": "npm run build:wasm && npm run build:ts && npm run copy:wasm",
     "clean": "rm -rf dist wasm",
     "test": "vitest run",
@@ -60,6 +65,7 @@
     "vitest": "^1.4.0"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   }
 }

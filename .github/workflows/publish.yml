@@ -1,50 +1,111 @@
-# Publish workflow — build and publish to npm on version tags
+# Publish workflow — build WASM + TS from source and publish to npm on version tags.
 #
-# Triggered by tags matching v* (e.g. v0.1.0, v0.2.0-rc.1).
+# Triggered by tags matching v*.*.* (stable) and v*.*.*-rc.* (release candidate).
+# The 'Check tag' step enforces strict semver and branch ancestry, and derives the
+# npm dist-tag: rc tags publish under 'rc', stable tags under 'latest'.
 #
-# Secrets required:
-#   NPM_TOKEN  — npm automation token with publish permissions
-#   (public package @tflo/browser-events — no OTP needed for
-#    automation tokens)
+# Authentication: 'npm publish --provenance' prefers OIDC trusted publishing
+# (id-token: write). NODE_AUTH_TOKEN is only a fallback for the very first publish
+# of the new scoped name, before the npm trusted publisher exists. Leave the
+# NPM_TOKEN secret unset afterwards and OIDC is used.
 
-name: Publish to npm
+name: Publish
 
 on:
     push:
         tags:
-            - "v*"
+            - "v*.*.*"
+            - "v*.*.*-rc.*"
+
+permissions:
+    contents: read
 
 jobs:
     publish:
         name: Build & Publish
         runs-on: ubuntu-latest
-        # Grant id-token permission for npm provenance (npm 9+)
         permissions:
             contents: read
-            id-token: write
+            id-token: write # provenance attestation + npm trusted publishing (OIDC)
+        concurrency:
+            group: publish-${{ github.ref }}
+            cancel-in-progress: false
+
+        env:
+            # matt-cochran/tflo pinned commit: build the WASM from a known-good,
+            # reproducible revision instead of a floating branch or moving tag.
+            TFLO_REF: "89914d071d14e886900792ad059054fbe8df4e65"
 
         steps:
+            # (1) Checkout this repo with full history so tag ancestry can be checked.
             - name: Checkout tflo-browser-events
-              uses: actions/checkout@v4
+              uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
               with:
+                  fetch-depth: 0
                   path: tflo-browser-events
+                  persist-credentials: false
 
-            - name: Checkout companion tflo monorepo
-              uses: actions/checkout@v4
+            # (2) Validate the tag: strict semver, matches package.json, and the
+            #     tagged commit is already on dev (rc) or main (stable).
+            - name: Check tag
+              id: tag
+              working-directory: tflo-browser-events
+              shell: bash
+              run: |
+                  set -euo pipefail
+
+                  TAG="${GITHUB_REF_NAME}"
+                  if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]]; then
+                    echo "error: tag '$TAG' must match vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-rc.N"
+                    exit 1
+                  fi
+
+                  VERSION="${TAG#v}"
+                  PKG_VERSION="$(node -p "require('./package.json').version")"
+                  if [[ "$VERSION" != "$PKG_VERSION" ]]; then
+                    echo "error: tag version '$VERSION' does not match package.json version '$PKG_VERSION'"
+                    exit 1
+                  fi
+
+                  if [[ "$TAG" == *-rc.* ]]; then
+                    DIST_TAG=rc
+                    BRANCH=dev
+                  else
+                    DIST_TAG=latest
+                    BRANCH=main
+                  fi
+
+                  git fetch --no-tags origin dev main
+                  if ! git merge-base --is-ancestor "$GITHUB_SHA" "origin/$BRANCH"; then
+                    echo "error: tagged commit $GITHUB_SHA is not an ancestor of origin/$BRANCH"
+                    exit 1
+                  fi
+
+                  echo "dist_tag=$DIST_TAG" >> "$GITHUB_OUTPUT"
+
+            # (3) Checkout the companion tflo monorepo at the pinned revision.
+            - name: Checkout tflo
+              uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
               with:
                   repository: matt-cochran/tflo
+                  ref: ${{ env.TFLO_REF }}
                   path: tflo
                   fetch-depth: 1
+                  persist-credentials: false
 
+            # (4) Rust toolchain with the wasm target.
             - name: Install Rust toolchain
-              uses: dtolnay/rust-toolchain@stable
+              uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d
               with:
+                  toolchain: stable
                   targets: wasm32-unknown-unknown
 
+            # (5) Install wasm-pack from crates.io (pinned, no curl | sh).
             - name: Install wasm-pack
-              run: |
-                  curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+              working-directory: tflo-browser-events
+              run: cargo install wasm-pack --locked --version 0.13.1
 
+            # (6a) Build WASM (web target) — into src/wasm/.
             - name: Build WASM (web target) — into src/wasm/
               working-directory: tflo/tflo-cep-wasm
               run: |
@@ -57,6 +118,7 @@ jobs:
               env:
                   RUSTC_WRAPPER: ""
 
+            # (6b) Build WASM (nodejs target) — tests depend on this.
             - name: Build WASM (nodejs target) — tests depend on this
               working-directory: tflo/tflo-cep-wasm
               run: |
@@ -68,39 +130,67 @@ jobs:
               env:
                   RUSTC_WRAPPER: ""
 
+            # (7) Node 22. No dependency cache in the release job: a cache restored from
+            #     another ref must never feed a published artifact (cache poisoning).
             - name: Setup Node.js
-              uses: actions/setup-node@v4
+              uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
               with:
-                  node-version: 20
-                  cache: npm
-                  cache-dependency-path: tflo-browser-events/package-lock.json
+                  node-version: 22
+                  registry-url: https://registry.npmjs.org
 
+            # (8) Trusted publishing needs npm >= 11.5.1, newer than the runner default.
+            - name: Upgrade npm
+              working-directory: tflo-browser-events
+              run: npm install -g npm@11.6.2
+
+            # (9) Clean install from the lockfile.
             - name: Install dependencies
               working-directory: tflo-browser-events
               run: npm ci
 
+            # (10) Type-check / lint.
             - name: Lint
               working-directory: tflo-browser-events
               run: npm run lint
 
+            # (11) Test against the freshly built WASM.
             - name: Run tests
               working-directory: tflo-browser-events
               run: npm test
 
-            - name: Build (TS compilation)
+            # (12) Compile TS and copy the built WASM into dist/.
+            - name: Build package
               working-directory: tflo-browser-events
-              run: npm run build:ts
+              run: npm run build:ts && npm run copy:wasm
 
-            - name: Configure npm authentication
+            # (13) Fail the release if the tarball is missing the WASM or ships tests.
+            - name: Verify package contents
               working-directory: tflo-browser-events
               run: |
-                  echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > .npmrc
+                  npm run verify:pack
+                  npm pack --dry-run --json > pack.json
+                  node -e "
+                    const fs = require('fs');
+                    const raw = JSON.parse(fs.readFileSync('pack.json', 'utf8'));
+                    const entry = Array.isArray(raw) ? raw[0] : Object.values(raw)[0];
+                    const files = entry.files.map((f) => f.path);
+                    if (!files.includes('dist/wasm/tflo_cep_wasm_bg.wasm')) {
+                      console.error('missing dist/wasm/tflo_cep_wasm_bg.wasm');
+                      process.exit(1);
+                    }
+                    const bad = files.filter((f) => f.startsWith('dist/__tests__') || /\.test\./.test(f));
+                    if (bad.length) {
+                      console.error('unexpected test files in package: ' + bad.join(', '));
+                      process.exit(1);
+                    }
+                  "
 
+            # (14) Publish under the derived dist-tag.
+            #      NODE_AUTH_TOKEN is used only for the first publish of the new
+            #      scoped name, before the npm trusted publisher exists. Leave the
+            #      secret unset afterwards and OIDC is used.
             - name: Publish to npm
               working-directory: tflo-browser-events
-              run: |
-                  # 'npm publish --provenance' uses id-token for attestation;
-                  # falls back to regular publish when provenance isn't supported.
-                  npm publish --provenance
+              run: npm publish --access public --provenance --tag ${{ steps.tag.outputs.dist_tag }}
               env:
                   NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

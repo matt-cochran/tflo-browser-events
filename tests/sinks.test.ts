@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   ConsoleSink,
-  EdgeSink,
   GA4Sink,
   SinkRouter,
   type DerivedSignal,
@@ -94,67 +93,7 @@ describe("ConsoleSink", () => {
   });
 });
 
-describe("EdgeSink", () => {
-  it("batches up to batchSize before flushing", async () => {
-    const calls: Array<{ url: string; body: string }> = [];
-    const fakeFetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
-      calls.push({ url: String(url), body: String(init?.body) });
-      return new Response(null, { status: 200 });
-    });
-    const sink = new EdgeSink({
-      endpoint: "/collect",
-      batchSize: 3,
-      batchIntervalMs: 60_000,
-      fetchImpl: fakeFetch as unknown as typeof fetch,
-    });
-    sink.send(signal("a"));
-    sink.send(signal("b"));
-    expect(calls.length).toBe(0); // not yet at batchSize
-    sink.send(signal("c")); // triggers flush
-    // Allow microtask queue to drain
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(calls.length).toBe(1);
-    const parsed = JSON.parse(calls[0]!.body) as { batch: DerivedSignal[] };
-    expect(parsed.batch.map((s) => s.name)).toEqual(["a", "b", "c"]);
-  });
-
-  it("flush(unloading=true) prefers sendBeacon when available", async () => {
-    const beaconCalls: Array<[string, BodyInit]> = [];
-    const sendBeacon = vi.fn((url: string, body: BodyInit) => {
-      beaconCalls.push([url, body]);
-      return true;
-    });
-    const fakeFetch = vi.fn();
-    const sink = new EdgeSink({
-      endpoint: "/collect",
-      fetchImpl: fakeFetch as unknown as typeof fetch,
-      sendBeacon,
-    });
-    sink.send(signal("a"));
-    await sink.flush({ unloading: true });
-    expect(beaconCalls.length).toBe(1);
-    expect(fakeFetch).not.toHaveBeenCalled();
-  });
-
-  it("falls back to fetch keepalive when sendBeacon refuses", async () => {
-    const sendBeacon = vi.fn(() => false);
-    const fetchCalls: RequestInit[] = [];
-    const fakeFetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
-      fetchCalls.push(init ?? {});
-      return new Response(null, { status: 200 });
-    });
-    const sink = new EdgeSink({
-      endpoint: "/collect",
-      fetchImpl: fakeFetch as unknown as typeof fetch,
-      sendBeacon,
-    });
-    sink.send(signal("a"));
-    await sink.flush({ unloading: true });
-    expect(fetchCalls.length).toBe(1);
-    expect(fetchCalls[0]?.keepalive).toBe(true);
-  });
-});
+// EdgeSink is covered in tests/edge.test.ts (transport rules: journeeze direct-mode contract C0b).
 
 describe("GA4Sink", () => {
   it("forwards to gtag with sendTo when configured", () => {
