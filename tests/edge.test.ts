@@ -674,3 +674,294 @@ describe("EdgeSink flush", () => {
     expect(calls.length).toBe(1);
   });
 });
+
+describe("EdgeSink Journeeze profile and hooks", () => {
+  it("sends text/plain;charset=UTF-8 by default under the journeeze profile", async () => {
+    const { fetchImpl, calls } = recordingFetch();
+    const sink = newSink({ profile: "journeeze", fetchImpl });
+    sink.send(signal("a"));
+    await sink.flush();
+    expect(calls[0]!.init.headers).toEqual({ "content-type": "text/plain;charset=UTF-8" });
+  });
+
+  it("throws a TypeError when journeeze is given application/json", () => {
+    expect(() => newSink({ profile: "journeeze", contentType: "application/json" })).toThrow(TypeError);
+  });
+
+  it("throws a TypeError when journeeze is given custom headers", () => {
+    expect(() => newSink({ profile: "journeeze", headers: { authorization: "token" } })).toThrow(TypeError);
+  });
+
+  it("waits for the batch timer after 49 journeeze events", async () => {
+    const { fetchImpl, calls } = recordingFetch();
+    const sink = newSink({ profile: "journeeze", fetchImpl });
+    for (let i = 0; i < 49; i++) sink.send(signal(`e${i}`));
+    expect(calls.length).toBe(0);
+  });
+
+  it("sends at once when the 50th journeeze event is queued", async () => {
+    const { fetchImpl, calls } = recordingFetch();
+    const sink = newSink({ profile: "journeeze", fetchImpl });
+    for (let i = 0; i < 49; i++) sink.send(signal(`e${i}`));
+    sink.send(signal("e49"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls.length).toBe(1);
+  });
+
+  it("does not send a partial journeeze batch at 4999 ms", async () => {
+    const { fetchImpl, calls } = recordingFetch();
+    const sink = newSink({ profile: "journeeze", fetchImpl });
+    sink.send(signal("a"));
+    await vi.advanceTimersByTimeAsync(4999);
+    expect(calls.length).toBe(0);
+  });
+
+  it("sends a partial journeeze batch at 5000 ms", async () => {
+    const { fetchImpl, calls } = recordingFetch();
+    const sink = newSink({ profile: "journeeze", fetchImpl });
+    sink.send(signal("a"));
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(calls.length).toBe(1);
+  });
+
+  it("caps the solo journeeze page-end beacon body at 16384 bytes", async () => {
+    const beacons = beaconRecorder();
+    const sink = newSink({ profile: "journeeze", sendBeacon: beacons.sendBeacon });
+    for (let i = 0; i < 40; i++) {
+      sink.send({ name: "big", ts: 0, payload: { filler: "x".repeat(700) } });
+    }
+    await sink.flush({ unloading: true });
+    const text = await beacons.calls[0]!.body.text();
+    expect(encoder.encode(text).length).toBeLessThanOrEqual(16_384);
+  });
+
+  it("drops the solo journeeze page-end overflow with page_end_overflow", async () => {
+    const drops: Array<[string, number]> = [];
+    const beacons = beaconRecorder(true);
+    const sink = newSink({
+      profile: "journeeze",
+      sendBeacon: beacons.sendBeacon,
+      onDrop: (reason, count) => drops.push([reason, count]),
+    });
+    for (let i = 0; i < 40; i++) {
+      sink.send({ name: "big", ts: 0, payload: { filler: "x".repeat(700) } });
+    }
+    await sink.flush({ unloading: true });
+    const body = JSON.parse(await beacons.calls[0]!.body.text()) as { batch: unknown[] };
+    expect(drops).toEqual([["page_end_overflow", 40 - body.batch.length]]);
+  });
+
+  it("caps the journeeze beacon body at the shared budget's available bytes", async () => {
+    const beacons = beaconRecorder();
+    const sink = newSink({
+      profile: "journeeze",
+      sendBeacon: beacons.sendBeacon,
+      pageEndBudget: { available: () => 2048, commit: () => {} },
+    });
+    for (let i = 0; i < 40; i++) {
+      sink.send({ name: "big", ts: 0, payload: { filler: "x".repeat(700) } });
+    }
+    await sink.flush({ unloading: true });
+    const text = await beacons.calls[0]!.body.text();
+    expect(encoder.encode(text).length).toBeLessThanOrEqual(2048);
+  });
+
+  it("commits the accepted beacon byte length to the shared budget once", async () => {
+    const beacons = beaconRecorder();
+    const commits: number[] = [];
+    const sink = newSink({
+      profile: "journeeze",
+      sendBeacon: beacons.sendBeacon,
+      pageEndBudget: { available: () => 4096, commit: (bytes) => commits.push(bytes) },
+    });
+    sink.send(signal("a"));
+    await sink.flush({ unloading: true });
+    const text = await beacons.calls[0]!.body.text();
+    expect(commits).toEqual([encoder.encode(text).length]);
+  });
+
+  it("sends no beacon when the shared budget has nothing available", async () => {
+    const beacons = beaconRecorder();
+    const sink = newSink({
+      profile: "journeeze",
+      sendBeacon: beacons.sendBeacon,
+      pageEndBudget: { available: () => 0, commit: () => {} },
+    });
+    sink.send(signal("a"));
+    await sink.flush({ unloading: true });
+    expect(beacons.calls.length).toBe(0);
+  });
+
+  it("drops nothing when the shared budget has nothing available", async () => {
+    const beacons = beaconRecorder();
+    const sink = newSink({
+      profile: "journeeze",
+      sendBeacon: beacons.sendBeacon,
+      pageEndBudget: { available: () => 0, commit: () => {} },
+    });
+    sink.send(signal("a"));
+    await sink.flush({ unloading: true });
+    expect(sink.stats().dropped).toBe(0);
+  });
+
+  it("passes the queued events with event_id and seq to encode", async () => {
+    let everyEventIdentified = false;
+    const { fetchImpl } = recordingFetch();
+    const sink = newSink({
+      fetchImpl,
+      encode: (events) => {
+        everyEventIdentified = events.every(
+          (event) => typeof event.event_id === "string" && typeof event.seq === "number",
+        );
+        return JSON.stringify({ batch: events });
+      },
+    });
+    sink.send(signal("a"));
+    await sink.flush();
+    expect(everyEventIdentified).toBe(true);
+  });
+
+  it("posts the exact string encode returns as the request body", async () => {
+    const { fetchImpl, calls } = recordingFetch();
+    const sink = newSink({ fetchImpl, encode: () => "CUSTOM-ENCODED-BODY" });
+    sink.send(signal("a"));
+    await sink.flush();
+    expect(calls[0]!.init.body).toBe("CUSTOM-ENCODED-BODY");
+  });
+
+  it("passes droppedSinceLastSend as the events dropped since the last delivered request", async () => {
+    const deliveredMetas: number[] = [];
+    const { fetchImpl } = recordingFetch();
+    const sink = newSink({
+      fetchImpl,
+      maxQueueEvents: 2,
+      encode: (events, meta) => {
+        if (events.length === 2) deliveredMetas.push(meta.droppedSinceLastSend);
+        return JSON.stringify({ batch: events });
+      },
+    });
+    for (const name of ["a", "b", "c", "d"]) sink.send(signal(name));
+    await sink.flush();
+    expect(deliveredMetas[0]).toBe(2);
+  });
+
+  it("passes droppedSinceLastSend as 0 after a delivered request", async () => {
+    const metas: number[] = [];
+    const { fetchImpl } = recordingFetch();
+    const sink = newSink({
+      fetchImpl,
+      maxQueueEvents: 2,
+      encode: (events, meta) => {
+        metas.push(meta.droppedSinceLastSend);
+        return JSON.stringify({ batch: events });
+      },
+    });
+    for (const name of ["a", "b", "c", "d"]) sink.send(signal(name));
+    await sink.flush();
+    sink.send(signal("e"));
+    await sink.flush();
+    expect(metas[metas.length - 1]).toBe(0);
+  });
+
+  it("splits batches so every encode-wrapped body is within maxBatchBytes", async () => {
+    const maxBatchBytes = 400;
+    const { fetchImpl, calls } = recordingFetch();
+    const sink = newSink({
+      fetchImpl,
+      batchSize: 50,
+      maxBatchBytes,
+      encode: (events) => JSON.stringify({ big: "x".repeat(120), batch: events }),
+    });
+    for (let i = 0; i < 5; i++) sink.send(signal(`e${i}`));
+    await sink.flush();
+    const lengths = calls.map((call) => encoder.encode(call.init.body as string).length);
+    expect(lengths).toEqual([324, 324, 232]);
+  });
+
+  it("omits a signal dropped by transform from every request", async () => {
+    const { fetchImpl, calls } = recordingFetch();
+    const sink = newSink({
+      fetchImpl,
+      transform: (s) => (s.name === "b" ? null : { ...s }),
+    });
+    sink.send(signal("a"));
+    sink.send(signal("b"));
+    sink.send(signal("c"));
+    await sink.flush();
+    expect(calls.flatMap(bodyNames)).toEqual(["a", "c"]);
+  });
+
+  it("does not consume seq for a signal dropped by transform", async () => {
+    const { fetchImpl, calls } = recordingFetch();
+    const sink = newSink({
+      fetchImpl,
+      transform: (s) => (s.name === "a" ? null : { ...s }),
+    });
+    sink.send(signal("a"));
+    sink.send(signal("b"));
+    await sink.flush();
+    expect(JSON.parse(calls[0]!.init.body as string).batch[0].seq).toBe(1);
+  });
+
+  it("puts transform's returned fields on the wire event alongside event_id and seq", async () => {
+    const { fetchImpl, calls } = recordingFetch();
+    const sink = newSink({ fetchImpl, transform: (s) => ({ label: s.name, ts: s.ts }) });
+    sink.send(signal("a"));
+    await sink.flush();
+    const event = JSON.parse(calls[0]!.init.body as string).batch[0] as Record<string, unknown>;
+    expect(Object.keys(event).sort()).toEqual(["event_id", "label", "seq", "ts"]);
+  });
+
+  it("does not mutate the original signal when transform maps it", async () => {
+    const { fetchImpl } = recordingFetch();
+    const input = signal("a");
+    const snapshot = JSON.parse(JSON.stringify(input));
+    const sink = newSink({ fetchImpl, transform: (s) => ({ ...s, name: "mapped" }) });
+    sink.send(input);
+    await sink.flush();
+    expect(input).toEqual(snapshot);
+  });
+
+  it("sends the generic profile's 20th event without waiting for the timer", async () => {
+    const { fetchImpl, calls } = recordingFetch();
+    const sink = newSink({ fetchImpl });
+    for (let i = 0; i < 19; i++) sink.send(signal(`e${i}`));
+    sink.send(signal("e19"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls.length).toBe(1);
+  });
+
+  it("does not send a generic partial batch at 999 ms", async () => {
+    const { fetchImpl, calls } = recordingFetch();
+    const sink = newSink({ fetchImpl });
+    sink.send(signal("a"));
+    await vi.advanceTimersByTimeAsync(999);
+    expect(calls.length).toBe(0);
+  });
+
+  it("sends a generic partial batch at 1000 ms", async () => {
+    const { fetchImpl, calls } = recordingFetch();
+    const sink = newSink({ fetchImpl });
+    sink.send(signal("a"));
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(calls.length).toBe(1);
+  });
+});
+
+describe("EdgeSink page end during an in-flight request", () => {
+  it("does not remove later events when a beacon already delivered the in-flight batch", async () => {
+    let release: (response: Response) => void = () => {};
+    const fetchImpl = vi.fn(
+      () => new Promise<Response>((resolve) => { release = resolve; }),
+    ) as unknown as typeof fetch;
+    const { sendBeacon } = beaconRecorder(true);
+    const sink = newSink({ fetchImpl, sendBeacon, batchSize: 2 });
+    sink.send(signal("a"));
+    sink.send(signal("b"));
+    await sink.flush({ unloading: true });
+    sink.send(signal("c"));
+    release(new Response(null, { status: 200 }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sink.stats()).toEqual({ queued: 1, dropped: 0, sent: 2 });
+  });
+});
