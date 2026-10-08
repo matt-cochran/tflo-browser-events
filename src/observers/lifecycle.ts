@@ -10,6 +10,8 @@ import type { LifecycleTrack } from "../types.js";
 
 export interface LifecycleObserverOptions {
     cfg: LifecycleTrack;
+    /** Include `location.hash` on route changes (`page.captureFullUrls`). Default false. */
+    fullUrls?: boolean;
     /** Called when a lifecycle event occurs. */
     handler: (record: EventRecord) => void;
     /** The page-load time anchor (e.g. `performance.timeOrigin`). */
@@ -88,7 +90,10 @@ export function captureLifecycle(opts: LifecycleObserverOptions): () => void {
             opts.handler({
                 ts: now(),
                 kind: "lifecycle.route_changed",
-                fields: { pathname: location.pathname, hash: location.hash },
+                // The fragment can carry tokens; only on opt-in (privacy.ts).
+                fields: opts.fullUrls
+                    ? { pathname: location.pathname, hash: location.hash }
+                    : { pathname: location.pathname },
             });
         };
         window.addEventListener("popstate", onRoute);

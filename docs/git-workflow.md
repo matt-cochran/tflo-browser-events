@@ -37,3 +37,9 @@ Urgent fixes may branch from `main` as `hotfix/<name>` and PR directly into
   admin-enforced.
 
 `main` must never be ahead of `dev`. After any hotfix, back-merge `main → dev`.
+
+**Merge method between long-lived branches.** Merge `dev → main` promotions and
+`main → dev` back-merges with a **merge commit, never squash**. A squash leaves
+`main` with a commit `dev` doesn't have, so the branches drift apart even when their
+content is identical. That happened with the 0.1.0 release and was repaired by #7
+(a back-merge) before 0.2.0. Feature branches into `dev` may be squashed.
