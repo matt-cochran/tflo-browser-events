@@ -43,6 +43,7 @@ import { Pattern } from "./pattern.js";
 import { ConsoleSink, EdgeSink, GA4Sink } from "./sinks/index.js";
 import { expandPresets } from "./presets.js";
 import { checkSelectorHealth } from "./diagnostics.js";
+import { capturableText } from "./privacy.js";
 import type {
     EventRecord,
     TrackingPlan,
@@ -344,10 +345,8 @@ function wireClickLayer(
     _configuredIds: Set<string>,
 ): () => void {
     // Build index: data-tflow-id → ClickTrack
-    const idIndex = new Map<string, string>(); // id → selector (for target context)
-    for (const c of clicks) {
-        idIndex.set(c.id, c.selector ?? `[data-tflow-id="${c.id}"]`);
-    }
+    const idIndex = new Map<string, ClickTrack>();
+    for (const c of clicks) idIndex.set(c.id, c);
 
     return capture<MouseEvent>(
         {
@@ -360,12 +359,16 @@ function wireClickLayer(
                 const tracked = closestTFlowElement(el);
                 if (!tracked) return {};
                 const tflowId = tracked.getAttribute("data-tflow-id");
-                if (!tflowId || !idIndex.has(tflowId)) return {};
-                return {
+                const track = tflowId ? idIndex.get(tflowId) : undefined;
+                if (!tflowId || !track) return {};
+                const fields: Record<string, string | null> = {
                     tflowId,
-                    text: tracked.textContent?.trim().slice(0, 80) ?? null,
                     tag: tracked.tagName.toLowerCase(),
                 };
+                // Element text only on explicit opt-in, and never from form
+                // fields, editable regions or masked subtrees (privacy.ts).
+                if (track.captureText === true) fields.text = capturableText(tracked);
+                return fields;
             },
             listenerOptions: { passive: true },
         },
@@ -380,7 +383,7 @@ function wireClickLayer(
                         id: tflowId,
                         type: "click",
                         selector:
-                            idIndex.get(tflowId) ??
+                            idIndex.get(tflowId)?.selector ??
                             `[data-tflow-id="${tflowId}"]`,
                     },
                 }),

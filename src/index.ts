@@ -63,6 +63,7 @@ export {
 
 // ─── Tracking Plan API (declarative init) ──────────────────────────
 export { init as tflo, type TFlowInitResult } from "./plan.js";
+export { MASK_SELECTOR, MAX_CAPTURED_TEXT, capturableText } from "./privacy.js";
 export { expandPreset, expandPresets } from "./presets.js";
 export {
     validatePlan,

@@ -189,6 +189,26 @@ clicks: [
 ]
 ```
 
+A click record carries `tflowId` and `tag`. It **does not carry the element's text** unless
+that click opts in:
+
+```ts
+clicks: [{ id: "save_draft", captureText: true }] // records fields.text, at most 80 chars
+```
+
+Only opt in where the element's text can never be customer content (names, ticket titles,
+messages). Even with the opt-in, text is never taken from inputs (including passwords),
+textareas, selects, editable regions, or anything inside `[data-tflo-mask]` or
+`[data-jz-mask]`. Those parts are skipped and the rest is kept:
+
+```html
+<button data-tflow-id="assign">Assign to <span data-tflo-mask>Ada Lovelace</span></button>
+<!-- with captureText: fields.text is "Assign to" -->
+```
+
+> **Changed in 0.3.0:** earlier versions recorded element text on every click. See
+> [CHANGELOG.md](CHANGELOG.md).
+
 ## Pointer sampling
 
 Mouse moves are opt-in and sampled. Raw paths are not sent by default.
@@ -500,6 +520,7 @@ tests/sinks.test.ts           7 tests   sink routing, error isolation, GA4
 tests/pattern-runtime.test.ts 6 tests   abandoned_cart, engaged_with_product, flush, builder validation
 tests/viewport.test.ts        6 tests   enter/exit/dwell, threshold-stepping, trailing-flush, multi-section
 tests/capture.test.ts         4 tests   custom fields, throttling, unbind
+tests/click-text.test.ts     11 tests   no element text by default, captureText opt-in, masked/form/editable regions skipped
 src/__tests__/identity.test.ts 2 tests  identity stamping, stable session id
 ```
 
@@ -528,7 +549,7 @@ cd tflo-browser-events
 npm install
 npm run build:wasm       # invokes wasm-pack against ../tflo/tflo-cep-wasm
 npm run build:ts         # invokes tsc
-npm test                 # 148 tests
+npm test                 # 159 tests
 ```
 
 `TFLO_PATH` overrides the default `../tflo` location.

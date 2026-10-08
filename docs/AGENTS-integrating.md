@@ -23,9 +23,11 @@ step-by-step guide for generating one: page type, sections, clicks, presets, CEL
   (only when pointer sampling is on), `scroll`, `error`, `unhandledrejection`, `load`,
   `pagehide`, `popstate`, `hashchange`, `visibilitychange`, and IntersectionObserver for
   sections. It never listens to `input`, `keydown` or `change`, and never reads form values.
-- **A click record includes the clicked element's text (first 80 characters).** Don't put a
-  `data-tflow-id` on an element whose text is customer content, or drop that field in your
-  sink (EdgeSink `transform`).
+- Click records carry no element text by default (since 0.3.0). `captureText: true` on a
+  `track.clicks` entry opts that click in (at most 80 characters). Only use it where the text
+  is never customer content. Even then, text from form fields, editable regions and anything
+  inside `[data-tflo-mask]` or `[data-jz-mask]` is never taken.
+- Mark customer content with `data-tflo-mask` (or `data-jz-mask` on Journeeze hosts).
 - Ship derived signals, not raw events, to third parties. Raw records stay in the page.
 
 ## One runtime per page

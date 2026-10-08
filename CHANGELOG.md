@@ -4,6 +4,23 @@ All notable changes to this package. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the package uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] — unreleased
+
+### Breaking
+- **Element text is no longer captured by default.** Click records carried the first 80
+  characters of the clicked element's text, which could ship customer content (names, ticket
+  titles) to a sink. They now carry only `tflowId` and `tag` (#10).
+- **Migration:** to keep text for a click, set `captureText: true` on that entry in
+  `track.clicks`. Only do this where the element's text is never customer content.
+
+### Added
+- `track.clicks[].captureText` opt-in. Even when it's on, text is never taken from inputs
+  (including passwords), textareas, selects, editable regions, or anything inside
+  `[data-tflo-mask]` or `[data-jz-mask]`; those parts are skipped and the rest kept.
+- `data-tflo-mask` attribute marking a subtree whose text never leaves the page.
+- `capturableText`, `MASK_SELECTOR` and `MAX_CAPTURED_TEXT` exports for hosts that apply the
+  same rule in their own sinks.
+
 ## [0.2.0] — 2026-10-08
 
 ### Changed
@@ -38,5 +55,6 @@ All notable changes to this package. The format follows
   the WASM `tflo-cep` pattern engine, and GA4, Edge and Console sinks.
 - Identity stamping and a stable SPA session id.
 
+[0.3.0]: https://github.com/matt-cochran/tflo-browser-events/compare/v0.2.0...dev
 [0.2.0]: https://github.com/matt-cochran/tflo-browser-events/releases/tag/v0.2.0
 [0.1.0]: https://www.npmjs.com/package/tflo-browser-events/v/0.1.0

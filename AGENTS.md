@@ -26,6 +26,12 @@ Agents building a host app that uses this package: read
 - **Publishing** uses the npm trusted publisher (OIDC). `NPM_TOKEN` is only a temporary
   fallback. No secrets in the repo.
 
+## Privacy
+Capture never records input values, and never records element text unless a click opts in
+with `captureText`. Even then, `src/privacy.ts` skips form fields, editable regions and
+`[data-tflo-mask]` / `[data-jz-mask]` subtrees. Any new capture of page text goes through
+`capturableText` and needs its own opt-in.
+
 ## EdgeSink is a contract
 `src/sinks/edge.ts` is consumed by Journeeze:
 `matt-cochran-products/journeeze-saas` `docs/contract/direct-mode-v1.md` §4.1 and

@@ -135,6 +135,13 @@ export interface ClickTrack {
      * `[data-tflow-id]`. Optional; when omitted, only elements with
      * `data-tflow-id` matching `id` are tracked. */
     selector?: string;
+    /** Opt in to recording the element's visible text on the click record
+     * (`fields.text`, at most 80 characters). **Off by default.** Unsafe
+     * for elements whose text can be customer content (names, ticket
+     * titles, messages). Even when on, text is never taken from form
+     * fields, editable regions, or anything inside `[data-tflo-mask]` or
+     * `[data-jz-mask]`. */
+    captureText?: boolean;
 }
 
 /** Pointer sampling configuration. */
