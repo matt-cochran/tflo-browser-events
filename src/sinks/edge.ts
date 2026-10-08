@@ -35,6 +35,14 @@
  *   fetch** is attempted (the beacon and keepalive share one quota); the
  *   queue is sent when the page is shown again. `unload`/`beforeunload`
  *   are never used, and normal sends never set `keepalive`.
+ *
+ * **Journeeze collectors** (per Allumata review on #77/#102, items B3 and
+ * B4): `profile: "journeeze"` forces `text/plain`, refuses custom
+ * headers and defaults to 50 events / 5 s. The page-end beacon shares one
+ * budget with every other Journeeze sender on the page: pass the SDK's
+ * `pageEndBudget`, or the sink keeps to 16 KiB on its own. `encode` lets
+ * the SDK wrap a batch in its request message (C0d `RecordSignalsRequest`)
+ * and `transform` maps or filters each signal before it is queued.
  */
 
 import type { DerivedSignal, Sink } from "../types.js";
@@ -54,6 +62,25 @@ export interface EdgeSinkStats {
   readonly dropped: number;
   /** Events acknowledged by a 2xx response or an accepted beacon. */
   readonly sent: number;
+}
+
+/** One event as queued: the (transformed) signal plus `event_id` and `seq`. */
+export type EdgeWireEvent = Record<string, unknown> & { event_id: string; seq: number };
+
+/** Context passed to `encode`. */
+export interface EdgeEncodeMeta {
+  /** Events this sink dropped since its last delivered request (aggregate, no ids). */
+  readonly droppedSinceLastSend: number;
+}
+
+/**
+ * A page-end beacon budget shared by every sender on the page (Allumata
+ * review B3). `available()` is what this sender may still beacon now;
+ * `commit(bytes)` records an accepted beacon.
+ */
+export interface PageEndBudget {
+  available(): number;
+  commit(bytes: number): void;
 }
 
 export interface EdgeSinkOptions {
@@ -96,11 +123,24 @@ export interface EdgeSinkOptions {
   bindPageLifecycle?: boolean;
   /** Called whenever events are dropped. */
   onDrop?: (reason: EdgeDropReason, count: number) => void;
+  /**
+   * `"journeeze"` applies the Journeeze collector profile: `text/plain`
+   * only (custom headers are refused), 50 events per batch, 5 s cadence
+   * and a 16 KiB page-end beacon unless `pageEndBudget` is given.
+   * Defaults to `"generic"`.
+   */
+  profile?: "generic" | "journeeze";
+  /** Request body for a batch. Defaults to `{"batch":[...]}`. */
+  encode?: (events: readonly EdgeWireEvent[], meta: EdgeEncodeMeta) => string;
+  /** Maps a signal to its wire fields, or returns null to drop it in the browser. */
+  transform?: (signal: DerivedSignal) => Record<string, unknown> | null;
+  /** Shared page-end budget (Allumata review B3). */
+  pageEndBudget?: PageEndBudget;
 }
 
 /** One queued event: the wire object and its encoded size. */
 interface Queued {
-  readonly wire: Record<string, unknown>;
+  readonly wire: EdgeWireEvent;
   readonly bytes: number;
 }
 
@@ -116,10 +156,17 @@ const MAX_HTTP_RETRIES = 5;
 const MAX_NETWORK_RETRIES = 3;
 const RETRIABLE_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
 const SEQ_MAX = 0xffff_ffff;
+/** Page-end cap for a Journeeze sender without a shared budget (Allumata review B3). */
+const SOLO_PAGE_END_BYTES = 16_384;
 const encoder = new TextEncoder();
 
-/** `{"batch":[` + `]}` around comma-separated events. */
-const ENVELOPE_BYTES = encoder.encode('{"batch":[]}').length;
+function byteLength(text: string): number {
+  return encoder.encode(text).length;
+}
+
+function defaultEncode(events: readonly EdgeWireEvent[]): string {
+  return JSON.stringify({ batch: events });
+}
 
 function positiveInt(value: number | undefined, fallback: number, label: string): number {
   if (value === undefined) return fallback;
@@ -180,6 +227,11 @@ export class EdgeSink implements Sink {
   private readonly random: () => number;
   private readonly randomBytes: (length: number) => Uint8Array;
   private readonly onDrop?: (reason: EdgeDropReason, count: number) => void;
+  private readonly encodeBody: (events: readonly EdgeWireEvent[], meta: EdgeEncodeMeta) => string;
+  private readonly transform?: (signal: DerivedSignal) => Record<string, unknown> | null;
+  private readonly pageEndBudget?: PageEndBudget;
+  private readonly pageEndBytes: number;
+  private droppedSinceLastSend = 0;
 
   private queue: Queued[] = [];
   private queueBytes = 0;
@@ -200,12 +252,19 @@ export class EdgeSink implements Sink {
   private readonly unbinders: Array<() => void> = [];
 
   constructor(opts: EdgeSinkOptions) {
+    const journeeze = opts.profile === "journeeze";
     this.name = opts.name ?? "edge";
     this.endpoint = opts.endpoint;
-    this.batchSize = Math.min(MAX_BATCH_EVENTS, positiveInt(opts.batchSize, 20, "batchSize"));
+    this.batchSize = Math.min(
+      MAX_BATCH_EVENTS,
+      positiveInt(opts.batchSize, journeeze ? MAX_BATCH_EVENTS : 20, "batchSize"),
+    );
     this.maxBatchBytes = positiveInt(opts.maxBatchBytes, 32_768, "maxBatchBytes");
-    this.batchIntervalMs = positiveInt(opts.batchIntervalMs, 1000, "batchIntervalMs");
-    this.contentType = opts.contentType ?? "application/json";
+    this.batchIntervalMs = positiveInt(opts.batchIntervalMs, journeeze ? 5000 : 1000, "batchIntervalMs");
+    if (journeeze && opts.contentType === "application/json") {
+      throw new TypeError('EdgeSink: the "journeeze" profile sends text/plain only (no preflight)');
+    }
+    this.contentType = journeeze ? "text/plain" : (opts.contentType ?? "application/json");
     this.headers = opts.headers ?? {};
     if (this.contentType === "text/plain" && Object.keys(this.headers).length > 0) {
       throw new TypeError(
@@ -220,6 +279,10 @@ export class EdgeSink implements Sink {
     this.random = opts.random ?? Math.random;
     this.randomBytes = opts.randomBytes ?? defaultRandomBytes;
     this.onDrop = opts.onDrop;
+    this.encodeBody = opts.encode ?? defaultEncode;
+    this.transform = opts.transform;
+    this.pageEndBudget = opts.pageEndBudget;
+    this.pageEndBytes = journeeze ? Math.min(SOLO_PAGE_END_BYTES, this.maxBatchBytes) : this.maxBatchBytes;
     if (opts.bindPageLifecycle ?? true) this.bindPageLifecycle();
   }
 
@@ -230,14 +293,16 @@ export class EdgeSink implements Sink {
 
   send(signal: DerivedSignal): void {
     if (this.closed) return;
+    const fields = this.transform ? this.transform(signal) : { ...signal };
+    if (fields === null) return;
     this.seq = this.seq >= SEQ_MAX ? 1 : this.seq + 1;
-    const wire: Record<string, unknown> = {
-      ...signal,
+    const wire: EdgeWireEvent = {
+      ...fields,
       event_id: uuidv7(this.now(), this.randomBytes),
       seq: this.seq,
     };
-    const bytes = encoder.encode(JSON.stringify(wire)).length;
-    if (ENVELOPE_BYTES + bytes > this.maxBatchBytes) {
+    const bytes = byteLength(JSON.stringify(wire));
+    if (this.encodedBytes([{ wire, bytes }]) > this.maxBatchBytes) {
       this.drop("oversize", 1);
       return;
     }
@@ -289,7 +354,7 @@ export class EdgeSink implements Sink {
   private async drain(): Promise<void> {
     this.clearBatchTimer();
     while (!this.closed && !this.retryPending && this.queue.length > 0) {
-      const batch = this.takeBatch();
+      const batch = this.takeBatch(this.maxBatchBytes);
       this.inFlight = batch.length;
       const outcome = await this.post(batch);
       if (this.closed) return;
@@ -300,6 +365,7 @@ export class EdgeSink implements Sink {
       if (outcome.kind === "ok") {
         this.removeHead(batch.length);
         this.sent += batch.length;
+        this.droppedSinceLastSend = 0;
         this.attempts = 0;
         continue;
       }
@@ -368,20 +434,30 @@ export class EdgeSink implements Sink {
   private pageEnd(): void {
     this.clearBatchTimer();
     if (this.queue.length === 0 || !this.sendBeacon) return;
-    const batch = this.takeBatch();
+    const limit = this.pageEndBudget
+      ? Math.min(this.maxBatchBytes, Math.max(0, this.pageEndBudget.available()))
+      : this.pageEndBytes;
+    const batch = this.takeBatch(limit);
+    if (batch.length === 0) {
+      // No budget left on this page: keep the events; they go if the page is shown again.
+      return;
+    }
+    const body = this.encode(batch);
     const type =
       this.contentType === "text/plain" ? "text/plain;charset=UTF-8" : "application/json";
     let accepted = false;
     try {
-      accepted = this.sendBeacon(this.endpoint, new Blob([this.encode(batch)], { type }));
+      accepted = this.sendBeacon(this.endpoint, new Blob([body], { type }));
     } catch {
       accepted = false;
     }
     if (!accepted) return;
+    this.pageEndBudget?.commit(byteLength(body));
     // A fetch may still be in flight for the head of the queue; the beacon
     // carries the same event_ids, so the collector counts them once.
     this.removeHead(batch.length);
     this.sent += batch.length;
+    this.droppedSinceLastSend = 0;
     const overflow = this.queue.length;
     if (overflow > 0) {
       this.queue = [];
@@ -395,18 +471,23 @@ export class EdgeSink implements Sink {
     this.waitingForOnline = false;
   }
 
-  /** The oldest events that fit in one request. */
-  private takeBatch(): Queued[] {
+  /** The oldest events whose encoded request fits in `limitBytes`. */
+  private takeBatch(limitBytes: number): Queued[] {
     const batch: Queued[] = [];
-    let bytes = ENVELOPE_BYTES;
+    let estimate = 0;
     for (const item of this.queue) {
       if (batch.length >= this.batchSize) break;
-      const next = bytes + item.bytes + (batch.length > 0 ? 1 : 0);
-      if (next > this.maxBatchBytes) break;
+      if (estimate + item.bytes + 1 > limitBytes) break;
       batch.push(item);
-      bytes = next;
+      estimate += item.bytes + 1;
     }
+    // The estimate ignores the envelope `encode` adds; trim until the real body fits.
+    while (batch.length > 0 && this.encodedBytes(batch) > limitBytes) batch.pop();
     return batch;
+  }
+
+  private encodedBytes(batch: readonly Queued[]): number {
+    return byteLength(this.encode(batch));
   }
 
   private removeHead(count: number): void {
@@ -428,8 +509,11 @@ export class EdgeSink implements Sink {
     if (count > 0) this.drop("queue_full", count);
   }
 
-  private encode(batch: Queued[]): string {
-    return JSON.stringify({ batch: batch.map((item) => item.wire) });
+  private encode(batch: readonly Queued[]): string {
+    return this.encodeBody(
+      batch.map((item) => item.wire),
+      { droppedSinceLastSend: this.droppedSinceLastSend },
+    );
   }
 
   private requestHeaders(): Record<string, string> {
@@ -439,6 +523,7 @@ export class EdgeSink implements Sink {
 
   private drop(reason: EdgeDropReason, count: number): void {
     this.dropped += count;
+    this.droppedSinceLastSend += count;
     try {
       this.onDrop?.(reason, count);
     } catch {
