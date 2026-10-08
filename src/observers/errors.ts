@@ -4,11 +4,14 @@
  * error source. Rate-limited to avoid flooding.
  */
 
+import { pathOnlyUrl, stripUrlQueries } from "../privacy.js";
 import type { EventRecord } from "../types.js";
 import type { ErrorTrack } from "../types.js";
 
 export interface ErrorObserverOptions {
     cfg: ErrorTrack;
+    /** Keep query strings and fragments in URLs (`page.captureFullUrls`). Default false. */
+    fullUrls?: boolean;
     handler: (record: EventRecord) => void;
     now?: () => number;
 }
@@ -16,6 +19,9 @@ export interface ErrorObserverOptions {
 /** Begin capturing global errors. Returns an unbind function. */
 export function captureErrors(opts: ErrorObserverOptions): () => void {
     const now = opts.now ?? (() => performance.now());
+    // URLs and URL-bearing text keep origin + path unless the plan opts in (privacy.ts).
+    const url = (u: string): string => (opts.fullUrls ? u : pathOnlyUrl(u));
+    const urls = (t: string): string => (opts.fullUrls ? t : stripUrlQueries(t));
     const maxEvents = opts.cfg.maxEvents ?? 50;
     let count = 0;
 
@@ -42,7 +48,7 @@ export function captureErrors(opts: ErrorObserverOptions): () => void {
     if (opts.cfg.jsErrors !== false) {
         const prev = window.onerror;
         window.onerror = (message, source, lineno, colno, error) => {
-            const msg = typeof message === "string" ? message : String(message);
+            const msg = urls(typeof message === "string" ? message : String(message));
             if (shouldIgnore(msg)) return;
             emit({
                 ts: now(),
@@ -50,15 +56,15 @@ export function captureErrors(opts: ErrorObserverOptions): () => void {
                 fields: {
                     source: "onerror",
                     message: msg,
-                    filename: source ?? undefined,
+                    filename: source ? url(source) : undefined,
                     lineno: lineno ?? undefined,
                     colno: colno ?? undefined,
-                    stack: error instanceof Error ? error.stack : undefined,
+                    stack: error instanceof Error && error.stack ? urls(error.stack) : undefined,
                 },
                 target: {
                     id: "window",
                     type: "source",
-                    selector: source ?? undefined,
+                    selector: source ? url(source) : undefined,
                 },
             });
             if (typeof prev === "function") {
@@ -74,12 +80,13 @@ export function captureErrors(opts: ErrorObserverOptions): () => void {
     if (opts.cfg.promiseRejections !== false) {
         const listener = (event: PromiseRejectionEvent) => {
             const reason = event.reason;
-            const msg =
+            const msg = urls(
                 reason instanceof Error
                     ? reason.message
                     : typeof reason === "string"
                       ? reason
-                      : JSON.stringify(reason).slice(0, 200);
+                      : JSON.stringify(reason).slice(0, 200),
+            );
             if (shouldIgnore(msg)) return;
             emit({
                 ts: now(),
@@ -87,7 +94,7 @@ export function captureErrors(opts: ErrorObserverOptions): () => void {
                 fields: {
                     source: "unhandledrejection",
                     reason: msg,
-                    stack: reason instanceof Error ? reason.stack : undefined,
+                    stack: reason instanceof Error && reason.stack ? urls(reason.stack) : undefined,
                 },
                 target: { id: "promise", type: "source" },
             });
@@ -105,12 +112,13 @@ export function captureErrors(opts: ErrorObserverOptions): () => void {
             if (!target) return;
             if (!("tagName" in target)) return;
             const el = target as HTMLElement;
-            const url =
+            const resource = url(
                 (el as HTMLImageElement).src ||
-                (el as HTMLScriptElement).src ||
-                (el as HTMLLinkElement).href ||
-                "";
-            const msg = `Failed to load ${el.tagName.toLowerCase()}: ${url}`;
+                    (el as HTMLScriptElement).src ||
+                    (el as HTMLLinkElement).href ||
+                    "",
+            );
+            const msg = `Failed to load ${el.tagName.toLowerCase()}: ${resource}`;
             if (shouldIgnore(msg)) return;
             emit({
                 ts: now(),
@@ -118,12 +126,12 @@ export function captureErrors(opts: ErrorObserverOptions): () => void {
                 fields: {
                     source: "resource",
                     resourceTag: target.tagName.toLowerCase(),
-                    resourceUrl: url,
+                    resourceUrl: resource,
                 },
                 target: {
                     id: "resource",
                     type: target.tagName.toLowerCase(),
-                    selector: url,
+                    selector: resource,
                 },
             });
         };

@@ -78,12 +78,24 @@ export interface PageInfo {
     attrs?: Record<string, string>;
 
     // ─── Auto-populated (GA4-inspired) ──────────────────────────
-    /** Page title — defaults to `document.title`. */
+    /** Page title. Sent as given. When omitted, `document.title` is sent
+     * only if `captureTitle` is true. */
     title?: string;
-    /** Full URL — defaults to `location.href`. */
+    /** Page URL. Sent as given. When omitted, `location.href` is sent as
+     * origin + path (no query or fragment) unless `captureFullUrls` is true. */
     url?: string;
-    /** Referring URL — defaults to `document.referrer`. */
+    /** Referring URL. Sent as given. When omitted, `document.referrer` is
+     * sent as origin + path unless `captureFullUrls` is true. */
     referrer?: string;
+    /** Opt in to sending `document.title` on `session_started`. **Off by
+     * default.** Unsafe where titles can hold customer content (names,
+     * ticket titles); prefer `id` and `attrs`. */
+    captureTitle?: boolean;
+    /** Opt in to query strings and fragments in URLs read from the page:
+     * the page URL, the referrer, route-change `hash`, resource-error URLs
+     * and URLs inside error messages and stacks. **Off by default**: they
+     * carry tokens, emails and search terms. */
+    captureFullUrls?: boolean;
     /** Locale — defaults to `navigator.language`. */
     locale?: string;
     /** Traffic source classification. Optional; set by your own
@@ -135,6 +147,13 @@ export interface ClickTrack {
      * `[data-tflow-id]`. Optional; when omitted, only elements with
      * `data-tflow-id` matching `id` are tracked. */
     selector?: string;
+    /** Opt in to recording the element's visible text on the click record
+     * (`fields.text`, at most 80 characters). **Off by default.** Unsafe
+     * for elements whose text can be customer content (names, ticket
+     * titles, messages). Even when on, text is never taken from form
+     * fields, editable regions, or anything inside `[data-tflo-mask]` or
+     * `[data-jz-mask]`. */
+    captureText?: boolean;
 }
 
 /** Pointer sampling configuration. */
