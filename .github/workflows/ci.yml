@@ -1,7 +1,8 @@
 # CI workflow — lint, build WASM + TS, run tests
 #
 # Expects the companion tflo-cep-wasm crate to be checked out in
-# ../tflo (the build script and pattern-runtime tests depend on it).
+# ../tflo at the pinned TFLO_REF (the build script and pattern-runtime
+# tests depend on it).
 #
 # Secrets (set in repo settings):
 #   none required for CI
@@ -10,13 +11,18 @@ name: CI
 
 on:
     push:
-        branches: [main, develop]
+        branches: [main, dev]
     pull_request:
-        branches: [main]
+        branches: [dev, main]
 
 concurrency:
     group: ${{ github.workflow }}-${{ github.ref }}
     cancel-in-progress: true
+
+env:
+    # matt-cochran/tflo pinned commit: same reviewed revision as TFLO_REF in
+    # publish.yml. Keep the two in step.
+    TFLO_REF: "89914d071d14e886900792ad059054fbe8df4e65"
 
 jobs:
     build-and-test:
@@ -37,6 +43,7 @@ jobs:
               uses: actions/checkout@v4
               with:
                   repository: matt-cochran/tflo
+                  ref: ${{ env.TFLO_REF }}
                   path: tflo
                   # Shallow clone is fine — we only need the WASM crate
                   fetch-depth: 1
